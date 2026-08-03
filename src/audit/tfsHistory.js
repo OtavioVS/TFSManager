@@ -14,8 +14,8 @@ const REVISAO_ATUAL = "9999";
 // Converte as revisoes de um work item em { "AAAA-MM-DD": horas }.
 // Cada entrada vira { hours, exata } — exata=false quando a data saiu da data da
 // revisao (lancamento feito fora deste CLI, sem comentario para ler).
-export function hoursByDayFromUpdates(updates = []) {
-  const totais = {};
+export function hoursByDayFromUpdates(updates = [], options = {}) {
+  const parcelas = [];
 
   for (const update of updates) {
     const campos = update?.fields || {};
@@ -25,7 +25,7 @@ export function hoursByDayFromUpdates(updates = []) {
     }
 
     const delta = toNumber(completed.newValue) - toNumber(completed.oldValue);
-    if (!(delta > 0)) {
+    if (delta === 0) {
       continue;
     }
 
@@ -36,11 +36,46 @@ export function hoursByDayFromUpdates(updates = []) {
       continue;
     }
 
-    const atual = totais[dia] || { hours: 0, exata: true };
-    totais[dia] = {
-      hours: arredondar(atual.hours + delta),
-      // Basta uma parcela sem comentario para o dia deixar de ser confiavel.
-      exata: atual.exata && Boolean(doComentario)
+    if (delta > 0) {
+      parcelas.push({
+        dia,
+        hours: delta,
+        exata: Boolean(doComentario)
+      });
+      continue;
+    }
+
+    // Uma redução de CompletedWork invalida horas que haviam sido registradas
+    // anteriormente. Remove primeiro as parcelas mais recentes.
+    let correction = Math.abs(delta);
+    for (let index = parcelas.length - 1; index >= 0 && correction > 0; index -= 1) {
+      const parcela = parcelas[index];
+      const removidas = Math.min(parcela.hours, correction);
+      parcela.hours = arredondar(parcela.hours - removidas);
+      correction = arredondar(correction - removidas);
+    }
+  }
+
+  const currentCompleted = Number(options.currentCompleted);
+  if (Number.isFinite(currentCompleted)) {
+    let remaining = Math.max(0, arredondar(currentCompleted));
+    for (let index = parcelas.length - 1; index >= 0 && remaining >= 0; index -= 1) {
+      const parcela = parcelas[index];
+      const mantidas = Math.min(parcela.hours, remaining);
+      parcela.hours = mantidas;
+      remaining = arredondar(remaining - mantidas);
+    }
+  }
+
+  const totais = {};
+  for (const parcela of parcelas) {
+    if (parcela.hours <= 0) {
+      continue;
+    }
+    const atual = totais[parcela.dia] || { hours: 0, exata: true };
+    totais[parcela.dia] = {
+      hours: arredondar(atual.hours + parcela.hours),
+      exata: atual.exata && parcela.exata
     };
   }
 

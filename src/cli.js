@@ -267,7 +267,18 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
   // Orcamento de horas ja ocupadas por dia; vai crescendo conforme cada card e alocado,
   // para que dois cards nao disputem o mesmo dia. O Time Box e a fonte com a data real;
   // audit e historico do TFS continuam como protecao para nunca subestimar.
-  const doAudit = sumAppliedHoursByDay(config.audit.logPath, { personName: args.personName });
+  const sprintCardsForAudit = await listAssignedCards(azureDevOpsClient, config, {
+    person: args.personName,
+    sprint: sprintName,
+    includeClosed: true
+  });
+  const doAudit = sumAppliedHoursByDay(config.audit.logPath, {
+    personName: args.personName,
+    workItems: sprintCardsForAudit.rows.map((row) => ({
+      id: row.id,
+      completed: Number(row.completed) || 0
+    }))
+  });
   const doTfs = await lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintName });
   const doTimebox = await lerHorasTimebox({
     timeboxClient,
@@ -856,7 +867,18 @@ async function printSprintDaySummary({ azureDevOpsClient, timeboxClient, config,
   }
 
   const pessoa = args.personName || defaultPersonName(config);
-  const doAudit = sumAppliedHoursByDay(config.audit.logPath, { personName: pessoa });
+  const sprintCardsForAudit = await listAssignedCards(azureDevOpsClient, config, {
+    person: pessoa,
+    sprint: sprintName,
+    includeClosed: true
+  });
+  const doAudit = sumAppliedHoursByDay(config.audit.logPath, {
+    personName: pessoa,
+    workItems: sprintCardsForAudit.rows.map((row) => ({
+      id: row.id,
+      completed: Number(row.completed) || 0
+    }))
+  });
   const doTfs = await lerHistoricoDaSprint({ azureDevOpsClient, config, args: { ...args, personName: pessoa }, sprintName });
   const doTimebox = await lerHorasTimebox({
     timeboxClient,
@@ -931,7 +953,9 @@ async function lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintNam
       daSprint.rows.map(async (row) => {
         try {
           const updates = await azureDevOpsClient.getWorkItemUpdates(row.id);
-          return hoursByDayFromUpdates(updates.value || []);
+          return hoursByDayFromUpdates(updates.value || [], {
+            currentCompleted: Number(row.completed) || 0
+          });
         } catch {
           return {};
         }

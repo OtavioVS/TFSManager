@@ -43,3 +43,30 @@ test("sumAppliedHoursForDay counts only successful apply entries for the same pe
 
   assert.equal(sumAppliedHoursForDay(logPath, { personName: "Max", workDate: "2026-06-25" }), 6.5);
 });
+
+test("sumAppliedHoursForDay reconciles deleted or reset work items", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "azdo-time-reconcile-"));
+  const logPath = path.join(dir, "audit.jsonl");
+  const entries = [
+    { mode: "apply", command: { workItemId: 100, personName: "Max", workDate: "2026-06-25", completedWorkDelta: 8 }, result: { ok: true } },
+    { mode: "apply", command: { workItemId: 100, personName: "Max", workDate: "2026-06-26", completedWorkDelta: 8 }, result: { ok: true } },
+    { mode: "apply", command: { workItemId: 200, personName: "Max", workDate: "2026-06-25", completedWorkDelta: 4 }, result: { ok: true } }
+  ];
+  fs.writeFileSync(logPath, entries.map((entry) => JSON.stringify(entry)).join("\n"), "utf8");
+
+  const workItems = [
+    { id: 100, completed: 0 },
+    { id: 200, completed: 2 }
+  ];
+
+  assert.equal(sumAppliedHoursForDay(logPath, {
+    personName: "Max",
+    workDate: "2026-06-25",
+    workItems
+  }), 2);
+  assert.equal(sumAppliedHoursForDay(logPath, {
+    personName: "Max",
+    workDate: "2026-06-26",
+    workItems
+  }), 0);
+});

@@ -45,10 +45,22 @@ test("hoursByDayFromUpdates falls back to the revision date and flags it", () =>
 
 test("hoursByDayFromUpdates ignores revisions that do not add hours", () => {
   const porDia = hoursByDayFromUpdates([
-    update("2026-06-08T10:00:00Z", 8, 8, "so mudou o estado"),
-    update("2026-06-08T11:00:00Z", 8, 4, "correcao para menos"),
-    { revisedDate: "2026-06-08T12:00:00Z", fields: { "System.State": { newValue: "Closed" } } }
+    update("2026-06-08T10:00:00Z", 0, 8, "lancamento"),
+    update("2026-06-08T11:00:00Z", 8, 8, "so mudou o estado"),
+    update("2026-06-08T12:00:00Z", 8, 4, "correcao para menos"),
+    { revisedDate: "2026-06-08T13:00:00Z", fields: { "System.State": { newValue: "Closed" } } }
   ]);
+
+  assert.deepEqual(porDia["2026-06-08"], { hours: 4, exata: false });
+});
+
+test("hoursByDayFromUpdates removes reset hours and respects current CompletedWork", () => {
+  const porDia = hoursByDayFromUpdates([
+    update("2026-08-03T10:00:00Z", 0, 8, ""),
+    update("2026-08-03T10:01:00Z", 8, 16, ""),
+    update("2026-08-03T10:02:00Z", 16, 8, ""),
+    update("2026-08-03T10:03:00Z", 8, 0, "")
+  ], { currentCompleted: 0 });
 
   assert.deepEqual(porDia, {});
 });
