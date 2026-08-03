@@ -167,9 +167,8 @@ export function listBusinessDays(startDate, finishDate) {
   return days;
 }
 
-// Quando o card nao tem RemainingWork, divide a capacidade ainda livre da sprint
-// pelo total de cards selecionados. A conta usa centesimos de hora para que casos
-// como 80h / 3 cards fechem exatamente, sem criar 0,01h a mais por arredondamento.
+// Quando o card nao tem RemainingWork, divide a capacidade que sobra depois dos
+// cards estimados entre os cards sem estimativa. A conta usa centesimos de hora.
 export function resolveSprintCardHours({
   cards = [],
   days = [],
@@ -184,23 +183,36 @@ export function resolveSprintCardHours({
   }, 0);
 
   const cardCount = cards.length;
-  const baseUnits = cardCount > 0 ? Math.floor(availableUnits / cardCount) : 0;
-  const extraUnits = cardCount > 0 ? availableUnits % cardCount : 0;
-  const automaticHours = cards.map((_, index) =>
-    roundHours((baseUnits + (index < extraUnits ? 1 : 0)) / 100)
+  const remainingByCard = cards.map((card) => optionalHours(card?.remaining));
+  const explicitUnits = remainingByCard.reduce(
+    (total, remaining) => total + (remaining === null ? 0 : Math.round(remaining * 100)),
+    0
+  );
+  const missingIndexes = remainingByCard
+    .map((remaining, index) => (remaining === null ? index : null))
+    .filter((index) => index !== null);
+  const automaticUnits = Math.max(0, availableUnits - explicitUnits);
+  const baseUnits = missingIndexes.length > 0 ? Math.floor(automaticUnits / missingIndexes.length) : 0;
+  const extraUnits = missingIndexes.length > 0 ? automaticUnits % missingIndexes.length : 0;
+  const automaticHours = new Map(
+    missingIndexes.map((cardIndex, index) => [
+      cardIndex,
+      roundHours((baseUnits + (index < extraUnits ? 1 : 0)) / 100)
+    ])
   );
 
-  const targets = cards.map((card, index) => {
-    const remaining = optionalHours(card?.remaining);
-    return remaining === null
-      ? { hours: automaticHours[index], source: "sprint-average" }
-      : { hours: remaining, source: "remaining-work" };
-  });
+  const targets = remainingByCard.map((remaining, index) =>
+    remaining === null
+      ? { hours: automaticHours.get(index) || 0, source: "sprint-average" }
+      : { hours: remaining, source: "remaining-work" }
+  );
 
   const availableHours = roundHours(availableUnits / 100);
   return {
     availableHours,
-    averageHours: cardCount > 0 ? roundHours(availableHours / cardCount) : 0,
+    averageHours: missingIndexes.length > 0
+      ? roundHours(automaticUnits / 100 / missingIndexes.length)
+      : 0,
     cardCount,
     targets
   };

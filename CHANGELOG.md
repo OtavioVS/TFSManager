@@ -2,6 +2,14 @@
 
 Todas as mudanças relevantes deste projeto serão registradas neste arquivo.
 
+## [0.2.1] - 2026-08-03
+
+### Corrigido
+
+- Reserva as estimativas `RemainingWork` antes de distribuir horas automaticamente entre cards sem estimativa.
+- Evita ultrapassar a capacidade da sprint por mistura de estimativas explícitas e automáticas.
+- Arredonda corretamente as horas exibidas em mensagens de capacidade excedida.
+
 ## [0.2.0] - 2026-08-03
 
 ### Adicionado

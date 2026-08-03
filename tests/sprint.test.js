@@ -163,7 +163,7 @@ test("missing estimates divide the free sprint hours by the total number of card
   );
 });
 
-test("RemainingWork wins, explicit zero stays zero, and logged hours reduce the fallback", () => {
+test("RemainingWork is reserved before distributing the remaining sprint capacity", () => {
   const result = resolveSprintCardHours({
     cards: [{ remaining: null }, { remaining: 12 }, { remaining: 0 }],
     days: ["2026-06-08", "2026-06-09"],
@@ -175,12 +175,32 @@ test("RemainingWork wins, explicit zero stays zero, and logged hours reduce the 
   });
 
   assert.equal(result.availableHours, 5);
-  assert.equal(result.averageHours, 1.67);
+  assert.equal(result.averageHours, 0);
   assert.deepEqual(result.targets, [
-    { hours: 1.67, source: "sprint-average" },
+    { hours: 0, source: "sprint-average" },
     { hours: 12, source: "remaining-work" },
     { hours: 0, source: "remaining-work" }
   ]);
+});
+
+test("explicit estimates do not inflate automatic estimates beyond sprint capacity", () => {
+  const result = resolveSprintCardHours({
+    cards: [
+      { remaining: 72 },
+      ...Array.from({ length: 16 }, () => ({ remaining: null }))
+    ],
+    days: listBusinessDays("2026-06-08", "2026-06-19"),
+    maxHoursPerDay: 8
+  });
+
+  assert.equal(result.availableHours, 80);
+  assert.equal(result.averageHours, 0.5);
+  assert.equal(result.targets[0].hours, 72);
+  assert.ok(result.targets.slice(1).every((target) => target.hours === 0.5));
+  assert.equal(
+    result.targets.reduce((total, target) => total + target.hours, 0),
+    80
+  );
 });
 
 test("planSprintAllocation fills 8h per day until the total is covered", () => {

@@ -1,6 +1,6 @@
 {
   "name": "azdo-time-service",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Servico CLI para apontar horas e mover work items do Azure DevOps/TFS.",

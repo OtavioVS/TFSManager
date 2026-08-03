@@ -339,8 +339,12 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
 
   const semEspaco = plans.filter((plan) => plan.allocation && plan.allocation.unallocated > 0);
   if (semEspaco.length > 0) {
+    const horasSemEspaco = semEspaco.reduce(
+      (total, plan) => roundHours(total + plan.allocation.unallocated),
+      0
+    );
     throw new Error(
-      `Nao cabem ${semEspaco.reduce((total, plan) => total + plan.allocation.unallocated, 0)}h na sprint ${sprintName}: ` +
+      `Nao cabem ${formatHours(horasSemEspaco)}h na sprint ${sprintName}: ` +
         `os dias uteis ja estao no limite de ${maxHoursPerDay}h/dia. Nada foi gravado.`
     );
   }
@@ -838,8 +842,12 @@ function mascarar(segredo) {
 }
 
 function formatHours(value) {
-  const rounded = Math.round(Number(value || 0) * 100) / 100;
+  const rounded = roundHours(value);
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace(".", ",");
+}
+
+function roundHours(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
 }
 
 // "atual"/"current"/"auto" pedem deteccao automatica da sprint.
@@ -1092,12 +1100,14 @@ function printSprintPlan({
       console.log(`  ${item.date}  ${weekdayLabel(item.date)}  pulado: ${item.reason}`);
     }
 
-    total += allocation.allocated;
-    const pendente = allocation.unallocated > 0 ? ` | FALTAM ${allocation.unallocated}h sem espaco` : "";
+    total = roundHours(total + allocation.allocated);
+    const pendente = allocation.unallocated > 0
+      ? ` | FALTAM ${formatHours(allocation.unallocated)}h sem espaco`
+      : "";
     console.log(`  -> ${allocation.allocated}h${pendente}${alvo ? ` | ao final: ${alvo}, restante 0` : ""}`);
   }
 
-  console.log(`\nTotal a lancar: ${Math.round(total * 100) / 100}h em ${plans.filter((plan) => plan.allocation).length} card(s).`);
+  console.log(`\nTotal a lancar: ${formatHours(total)}h em ${plans.filter((plan) => plan.allocation).length} card(s).`);
   if (args.comment) {
     console.log(`Comentario em cada lancamento: "${args.comment}"`);
   }
