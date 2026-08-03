@@ -279,14 +279,17 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
       completed: Number(row.completed) || 0
     }))
   });
-  const doTfs = await lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintName });
+  const tfsHistory = await lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintName });
+  const doTfs = tfsHistory.hours;
   const doTimebox = await lerHorasTimebox({
     timeboxClient,
     config,
     startDate: window.startDate,
     endDate: window.finishDate
   });
-  const hoursByDay = mergeHoursByDay(doAudit, doTfs, doTimebox);
+  const hoursByDay = tfsHistory.available
+    ? doTfs
+    : mergeHoursByDay(doAudit, doTimebox);
 
   const estimados = diasEstimados(doTfs).filter((dia) => days.includes(dia));
   if (estimados.length > 0) {
@@ -887,14 +890,22 @@ async function printSprintDaySummary({ azureDevOpsClient, timeboxClient, config,
       completed: Number(row.completed) || 0
     }))
   });
-  const doTfs = await lerHistoricoDaSprint({ azureDevOpsClient, config, args: { ...args, personName: pessoa }, sprintName });
+  const tfsHistory = await lerHistoricoDaSprint({
+    azureDevOpsClient,
+    config,
+    args: { ...args, personName: pessoa },
+    sprintName
+  });
+  const doTfs = tfsHistory.hours;
   const doTimebox = await lerHorasTimebox({
     timeboxClient,
     config,
     startDate: window.startDate,
     endDate: window.finishDate
   });
-  const porDia = mergeHoursByDay(doAudit, doTfs, doTimebox);
+  const porDia = tfsHistory.available
+    ? doTfs
+    : mergeHoursByDay(doAudit, doTimebox);
 
   const limite = config.policy.maxHoursPerDay;
   const dias = listBusinessDays(window.startDate, window.finishDate);
@@ -917,9 +928,9 @@ async function printSprintDaySummary({ azureDevOpsClient, timeboxClient, config,
   );
 }
 
-// O Time Box guarda a data trabalhada de forma nativa e por isso e a fonte
-// principal do limite diario. Quando a integracao esta ligada, falhar a consulta
-// bloqueia o planejamento: continuar poderia repetir exatamente o caso de 16h.
+// O historico atual do Azure DevOps e a fonte principal do limite diario.
+// O Time Box continua sendo consultado quando habilitado e serve como fallback
+// somente se o Azure nao puder ser consultado.
 async function lerHorasTimebox({ timeboxClient, config, startDate, endDate }) {
   if (!config.timebox?.enabled) {
     return {};
@@ -947,7 +958,7 @@ async function lerHorasTimebox({ timeboxClient, config, startDate, endDate }) {
 // ja foi lancado em cada dia, mesmo que tenha sido feito em outra maquina.
 async function lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintName }) {
   if (!sprintName) {
-    return {};
+    return { hours: {}, available: false };
   }
 
   try {
@@ -957,15 +968,20 @@ async function lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintNam
       includeClosed: true
     });
 
+    let available = true;
     const historicos = await Promise.all(
       daSprint.rows.map(async (row) => {
         try {
           const updates = await azureDevOpsClient.getWorkItemUpdates(row.id);
-          return hoursByDayFromUpdates(updates.value || [], {
-            currentCompleted: Number(row.completed) || 0
-          });
+          return {
+            hours: hoursByDayFromUpdates(updates.value || [], {
+              currentCompleted: Number(row.completed) || 0
+            }),
+            available: true
+          };
         } catch {
-          return {};
+          available = false;
+          return { hours: {}, available: false };
         }
       })
     );
@@ -973,7 +989,7 @@ async function lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintNam
     // Cards diferentes somam no mesmo dia.
     const total = {};
     for (const historico of historicos) {
-      for (const [dia, valor] of Object.entries(historico)) {
+      for (const [dia, valor] of Object.entries(historico.hours)) {
         const atual = total[dia] || { hours: 0, exata: true };
         total[dia] = {
           hours: Math.round((atual.hours + valor.hours) * 100) / 100,
@@ -982,10 +998,10 @@ async function lerHistoricoDaSprint({ azureDevOpsClient, config, args, sprintNam
       }
     }
 
-    return total;
+    return { hours: total, available };
   } catch {
     // Sem historico do TFS o planejamento continua com o audit log local.
-    return {};
+    return { hours: {}, available: false };
   }
 }
 

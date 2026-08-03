@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { WorkItemService, buildPatchOperations, summarizeChanges } from "../src/work-items/service.js";
+import {
+  WorkItemService,
+  buildPatchOperations,
+  summarizeChanges,
+  validateDailyHours
+} from "../src/work-items/service.js";
 
 const workItem = {
   id: 12345,
@@ -241,6 +246,74 @@ test("WorkItemService blocks a duplicate day using hours already in Timebox", as
   assert.equal(result.dailyHours.nextTotal, 16);
   assert.equal(loadedWorkItem, false);
   assert.match(result.errors[0], /8h ja lancadas no Time Box/);
+});
+
+test("Azure current history is authoritative over local audit and Timebox", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "azdo-time-service-authority-"));
+  const logPath = path.join(dir, "audit.jsonl");
+  fs.writeFileSync(
+    logPath,
+    `${JSON.stringify({
+      mode: "apply",
+      command: { personName: "Max", workDate: "2026-07-21", completedWorkDelta: 8 },
+      result: { ok: true, stage: "applied" }
+    })}\n`,
+    "utf8"
+  );
+
+  const result = await validateDailyHours(
+    {
+      workItemId: 12345,
+      personName: "Max",
+      completedWorkDelta: 8,
+      workDate: "2026-07-21"
+    },
+    serviceConfig({ timeboxEnabled: true, auditLogPath: logPath }),
+    { searchAppointments: async () => [] },
+    {
+      getWorkItem: async () => ({
+        fields: { "Microsoft.VSTS.Scheduling.CompletedWork": 0 }
+      }),
+      getWorkItemUpdates: async () => ({ value: [] })
+    }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.details.azureHours, 0);
+  assert.equal(result.details.auditHours, 8);
+  assert.equal(result.details.hoursSource, "azure");
+});
+
+test("Azure daily history blocks a duplicate even when local and Timebox are empty", async () => {
+  const result = await validateDailyHours(
+    {
+      workItemId: 12345,
+      personName: "Max",
+      completedWorkDelta: 8,
+      workDate: "2026-07-21"
+    },
+    serviceConfig({ timeboxEnabled: true }),
+    { searchAppointments: async () => [] },
+    {
+      getWorkItem: async () => ({
+        fields: { "Microsoft.VSTS.Scheduling.CompletedWork": 8 }
+      }),
+      getWorkItemUpdates: async () => ({
+        value: [{
+          revisedDate: "2026-07-21T10:00:00Z",
+          fields: {
+            "Microsoft.VSTS.Scheduling.CompletedWork": { oldValue: 0, newValue: 8 },
+            "System.History": { newValue: "Apontamento (Refere-se ao dia 2026-07-21.)" }
+          }
+        }]
+      })
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.details.azureHours, 8);
+  assert.equal(result.details.hoursSource, "azure");
+  assert.match(result.errors[0], /8h ja lancadas no Azure DevOps/);
 });
 
 test("WorkItemService fails closed when Timebox cannot be checked", async () => {

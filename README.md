@@ -203,10 +203,10 @@ gravados e o processo para ali.
 
 Limitacao: no TFS, `CompletedWork` e um acumulado do card, nao um lancamento por dia — a data
 de cada parcela aparece no historico (`System.History`) e no audit log. Lancamento por dia de
-verdade so existe via Time Box. Por isso, quando a integracao esta ligada, a contabilidade
-"quanto ja tem neste dia" consulta primeiro os `appointments` do Time Box. O maior valor
-conhecido entre Time Box, audit local e historico confiavel do TFS e usado para nunca liberar
-mais de 8h.
+verdade so existe via Time Box. Para decidir quanto ja existe em um dia, o historico atual do
+Azure DevOps e a fonte da verdade; o audit local so e usado quando a consulta ao Azure nao esta
+disponivel. O Time Box continua sendo consultado para a integracao e como fallback de seguranca,
+mas nao sobrescreve o estado atual do Azure DevOps.
 
 ## Aviso de horas futuras
 

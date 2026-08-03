@@ -1,5 +1,6 @@
 import { WORK_ITEM_FIELDS } from "../azure-devops/client.js";
 import { sumAppliedHoursForDay } from "../audit/dailyHours.js";
+import { hoursByDayFromUpdates } from "../audit/tfsHistory.js";
 import { buildTimeboxPlan } from "../timebox/client.js";
 import { hoursByDayFromAppointments } from "../timebox/summary.js";
 import { validateParsedCommand, validateWorkItemOwnership } from "./policy.js";
@@ -29,7 +30,12 @@ export class WorkItemService {
       };
     }
 
-    const dailyValidation = await validateDailyHours(command, this.config, this.timeboxClient);
+    const dailyValidation = await validateDailyHours(
+      command,
+      this.config,
+      this.timeboxClient,
+      this.azureDevOpsClient
+    );
     if (!dailyValidation.ok) {
       return {
         ok: false,
@@ -241,7 +247,12 @@ export function buildComment(command) {
   return base;
 }
 
-export async function validateDailyHours(command, config, timeboxClient = null) {
+export async function validateDailyHours(
+  command,
+  config,
+  timeboxClient = null,
+  azureDevOpsClient = null
+) {
   const maxHoursPerDay = Number(config.policy?.maxHoursPerDay);
   if (!Number.isFinite(maxHoursPerDay) || maxHoursPerDay <= 0 || !command.workDate) {
     return { ok: true, errors: [], warnings: [], details: null };
@@ -252,53 +263,75 @@ export async function validateDailyHours(command, config, timeboxClient = null) 
     workDate: command.workDate
   }));
 
+  const azure = await readAzureHoursForDay(azureDevOpsClient, command);
+  const azureHours = azure.available ? azure.hours : null;
   let timeboxHours = null;
+  const warnings = [];
   if (config.timebox?.enabled) {
     if (!timeboxClient || typeof timeboxClient.searchAppointments !== "function") {
-      return {
-        ok: false,
-        errors: [
-          "Time Box esta ligado, mas nao foi possivel consultar os apontamentos existentes. Nada foi gravado."
-        ],
-        warnings: [],
-        details: {
-          workDate: command.workDate,
-          auditHours,
-          timeboxHours: null,
-          maxHoursPerDay
+      if (!azure.available) {
+        return {
+          ok: false,
+          errors: [
+            "Time Box esta ligado, mas nao foi possivel consultar os apontamentos existentes e o Azure DevOps tambem nao pode ser consultado. Nada foi gravado."
+          ],
+          warnings: [],
+          details: {
+            workDate: command.workDate,
+            auditHours,
+            azureHours: null,
+            hoursSource: "none",
+            timeboxHours: null,
+            maxHoursPerDay
+          }
+        };
+      }
+      warnings.push("Time Box nao foi consultado; o Azure DevOps permanece como fonte da verdade.");
+    } else {
+      try {
+        const appointments = await timeboxClient.searchAppointments({
+          userId: config.timebox.user?.id,
+          startedAt: command.workDate,
+          endedAt: command.workDate
+        });
+        timeboxHours = roundHours(hoursByDayFromAppointments(appointments)[command.workDate] || 0);
+      } catch (error) {
+        if (!azure.available) {
+          return {
+            ok: false,
+            errors: [
+              `Nao foi possivel validar as horas de ${command.workDate} no Time Box: ${error.message}. Nada foi gravado.`
+            ],
+            warnings: [],
+            details: {
+              workDate: command.workDate,
+              auditHours,
+              azureHours: null,
+              hoursSource: "none",
+              timeboxHours: null,
+              maxHoursPerDay
+            }
+          };
         }
-      };
-    }
-
-    try {
-      const appointments = await timeboxClient.searchAppointments({
-        userId: config.timebox.user?.id,
-        startedAt: command.workDate,
-        endedAt: command.workDate
-      });
-      timeboxHours = roundHours(hoursByDayFromAppointments(appointments)[command.workDate] || 0);
-    } catch (error) {
-      return {
-        ok: false,
-        errors: [
-          `Nao foi possivel validar as horas de ${command.workDate} no Time Box: ${error.message}. Nada foi gravado.`
-        ],
-        warnings: [],
-        details: {
-          workDate: command.workDate,
-          auditHours,
-          timeboxHours: null,
-          maxHoursPerDay
-        }
-      };
+        warnings.push(`Time Box nao foi consultado (${error.message}); o Azure DevOps permanece como fonte da verdade.`);
+      }
     }
   }
 
-  const alreadyLogged = roundHours(Math.max(auditHours, timeboxHours ?? 0));
+  const hoursSource = azure.available
+    ? "azure"
+    : timeboxHours !== null && timeboxHours > auditHours
+      ? "timebox"
+      : "audit";
+  const alreadyLogged = azure.available
+    ? azureHours
+    : roundHours(Math.max(auditHours, timeboxHours ?? 0));
   const nextTotal = roundHours(alreadyLogged + command.completedWorkDelta);
   const details = {
     workDate: command.workDate,
     auditHours,
+    azureHours,
+    hoursSource,
     timeboxHours,
     alreadyLogged,
     requestedHours: command.completedWorkDelta,
@@ -306,34 +339,47 @@ export async function validateDailyHours(command, config, timeboxClient = null) 
     maxHoursPerDay
   };
 
-  // Se este CLI sabe que o Azure recebeu mais horas do que existem no Time Box,
-  // criar outro apontamento manteria as fontes divergentes. Falha fechada para o
-  // usuario corrigir a pendencia antes de continuar.
-  if (timeboxHours !== null && auditHours > timeboxHours) {
-    return {
-      ok: false,
-      errors: [
-        `Fontes desalinhadas em ${command.workDate}: o historico local/Azure registra ${auditHours}h, ` +
-          `mas o Time Box registra ${timeboxHours}h. Corrija a diferenca antes de lancar novas horas.`
-      ],
-      warnings: [],
-      details
-    };
-  }
-
   if (nextTotal > maxHoursPerDay) {
+    const sourceLabel = hoursSource === "azure"
+      ? "no Azure DevOps"
+      : hoursSource === "timebox"
+        ? "no Time Box"
+        : "no historico local";
     return {
       ok: false,
       errors: [
         `Limite diario excedido em ${command.workDate}: ${alreadyLogged}h ja lancadas` +
-          `${timeboxHours !== null ? " no Time Box" : ""}, +${command.completedWorkDelta}h passaria de ${maxHoursPerDay}h.`
+          ` ${sourceLabel}, +${command.completedWorkDelta}h passaria de ${maxHoursPerDay}h.`
       ],
-      warnings: [],
+      warnings,
       details
     };
   }
 
-  return { ok: true, errors: [], warnings: [], details };
+  return { ok: true, errors: [], warnings, details };
+}
+
+async function readAzureHoursForDay(azureDevOpsClient, command) {
+  if (
+    !azureDevOpsClient ||
+    typeof azureDevOpsClient.getWorkItem !== "function" ||
+    typeof azureDevOpsClient.getWorkItemUpdates !== "function"
+  ) {
+    return { available: false, hours: null };
+  }
+
+  try {
+    const workItem = await azureDevOpsClient.getWorkItem(command.workItemId, [COMPLETED_WORK]);
+    const updates = await azureDevOpsClient.getWorkItemUpdates(command.workItemId);
+    const currentCompleted = toNumber(workItem?.fields?.[COMPLETED_WORK], 0);
+    const byDay = hoursByDayFromUpdates(updates?.value || [], { currentCompleted });
+    return {
+      available: true,
+      hours: roundHours(byDay[command.workDate]?.hours || 0)
+    };
+  } catch {
+    return { available: false, hours: null };
+  }
 }
 
 function buildWorkItemFields(config) {

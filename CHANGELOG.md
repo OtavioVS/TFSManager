@@ -2,6 +2,14 @@
 
 Todas as mudanças relevantes deste projeto serão registradas neste arquivo.
 
+## [0.2.2] - 2026-08-03
+
+### Corrigido
+
+- Usa o histórico atual do Azure DevOps como fonte da verdade para a validação diária.
+- Usa o audit local somente quando não é possível consultar o Azure DevOps.
+- Evita que horas antigas do audit local bloqueiem ou preencham novamente cards já corrigidos no Azure.
+
 ## [0.2.1] - 2026-08-03
 
 ### Corrigido
