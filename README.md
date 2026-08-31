@@ -1,6 +1,6 @@
 # Servico de apontamento Azure DevOps para Claude CLI
 
-Este workspace contem um CLI construido pelo Codex para apontar horas e mover cards no Azure DevOps/TFS. O Claude CLI fica fora deste projeto: ele interpreta a conversa com o usuario e chama este servico usando JSON ou flags estruturadas.
+Este workspace contem um CLI para apontar horas e mover cards no Azure DevOps/TFS, com interface interativa amigavel, integracao com o Time Box e suporte a boards de sprint quinzenal ou Kanban mensal. O Claude CLI fica fora deste projeto: ele interpreta a conversa com o usuario e chama este servico usando JSON ou flags estruturadas.
 
 Documento principal:
 
@@ -28,21 +28,34 @@ Para quem nao quer decorar comando, use a interface com menu:
 Na **primeira vez** ela faz o setup sozinha: pergunta a URL da organizacao, o projeto, seu **PAT** (token) e seu nome/e-mail do Azure DevOps. Depois e so usar o menu:
 
 ```text
-  [1] Lancar a sprint      tudo que falta, e fecha os cards
-  [2] Lancar o mes         board mensal, dias uteis e 8h/dia
-  [3] Apontar um card      horas num card so
-  [4] Ver meus cards
-  [5] Visao mensal         horas por dia e limite de 8h
-  [6] Criar tarefas        cards filhos de uma user story
-  [7] Configuracao
-  [8] Time Box Control
-  [9] Ajuda
-  [0] Sair
+   APONTADOR DE HORAS
+   Azure DevOps + Time Box
+   Operando como : Otavio Saviotti
+   Hoje          : segunda-feira, 31 de agosto de 2026
+   Time Box      : LIGADO (grava no Azure e no Time Box)
+
+  LANCAR
+   [1] Lancar a sprint   completa a sprint e fecha os cards
+   [2] Lancar o mes      board mensal, dias uteis, 8h/dia
+   [3] Apontar um card   horas avulsas, com IA opcional
+
+  CONSULTAR
+   [4] Meus cards        lista por sprint e status
+   [5] Visao mensal      o que falta em cada dia do mes
+
+  FERRAMENTAS
+   [6] Criar tarefas     tasks filhas de uma user story
+   [7] Configuracao      servidor, token, identidade
+   [8] Time Box          status e renovacao do token
+   [9] Ajuda             exemplos e regras
+
+   [0] Sair
 ```
 
 A interface mostra um banner com a identidade, a data de hoje e o status do Time Box, agrupa
 as opcoes em **Lancar / Consultar / Ferramentas** e aceita `v` em qualquer pergunta para voltar
-sem gravar nada. Enter sempre aceita o valor entre [colchetes].
+sem gravar nada. Enter sempre aceita o valor entre [colchetes]; entradas invalidas sao
+pedidas de novo em vez de abortar para o menu.
 
 A opcao **[1]** e o caminho normal: Enter na pergunta da sprint (ele acha a atual sozinho),
 escolhe `Closed`, confere a simulacao e confirma.
