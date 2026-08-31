@@ -163,6 +163,21 @@ test("missing estimates divide the free sprint hours by the total number of card
   );
 });
 
+test("monthly capacity subtracts hours already used on other cards", () => {
+  const days = listBusinessDays("2026-08-01", "2026-08-31");
+  const hoursByDay = Object.fromEntries(days.slice(0, 10).map((date) => [date, 8]));
+  const result = resolveSprintCardHours({
+    cards: Array.from({ length: 14 }, () => ({ remaining: null })),
+    days,
+    maxHoursPerDay: 8,
+    hoursByDay
+  });
+
+  assert.equal(days.length, 21);
+  assert.equal(result.availableHours, 88);
+  assert.equal(result.averageHours, 6.29);
+});
+
 test("RemainingWork is reserved before distributing the remaining sprint capacity", () => {
   const result = resolveSprintCardHours({
     cards: [{ remaining: null }, { remaining: 12 }, { remaining: 0 }],
@@ -246,6 +261,23 @@ test("planSprintAllocation skips full days and uses partial free hours", () => {
       ["2026-06-17", 5]
     ]
   );
+});
+
+test("planSprintAllocation accepts Azure history hour objects", () => {
+  const plan = planSprintAllocation({
+    days: ["2026-06-08", "2026-06-09"],
+    totalHours: 4,
+    maxHoursPerDay: 8,
+    hoursByDay: {
+      "2026-06-08": { hours: 8, exata: true }
+    }
+  });
+
+  assert.deepEqual(plan.allocations, [
+    { date: "2026-06-09", hours: 4, alreadyLogged: 0 }
+  ]);
+  assert.equal(plan.allocated, 4);
+  assert.equal(plan.unallocated, 0);
 });
 
 test("two cards share the same daily budget without exceeding the limit", () => {

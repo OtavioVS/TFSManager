@@ -29,20 +29,29 @@ Na **primeira vez** ela faz o setup sozinha: pergunta a URL da organizacao, o pr
 
 ```text
   [1] Lancar a sprint      tudo que falta, e fecha os cards
-  [2] Apontar um card      horas num card so
-  [3] Ver meus cards
-  [4] Visao mensal         horas por dia e limite de 8h
-  [5] Criar tarefas        cards filhos de uma user story
-  [6] Configuracao
-  [7] Time Box Control
-  [8] Ajuda
+  [2] Lancar o mes         board mensal, dias uteis e 8h/dia
+  [3] Apontar um card      horas num card so
+  [4] Ver meus cards
+  [5] Visao mensal         horas por dia e limite de 8h
+  [6] Criar tarefas        cards filhos de uma user story
+  [7] Configuracao
+  [8] Time Box Control
+  [9] Ajuda
   [0] Sair
 ```
+
+A interface mostra um banner com a identidade, a data de hoje e o status do Time Box, agrupa
+as opcoes em **Lancar / Consultar / Ferramentas** e aceita `v` em qualquer pergunta para voltar
+sem gravar nada. Enter sempre aceita o valor entre [colchetes].
 
 A opcao **[1]** e o caminho normal: Enter na pergunta da sprint (ele acha a atual sozinho),
 escolhe `Closed`, confere a simulacao e confirma.
 
-Na **[2]**, se voce tiver o `claude` CLI instalado da pra escrever *"4h de ontem e move pra
+Na **[2]**, informe o mes e a iteracao mensal (por padrao, `AAAA Mmm`, como `2026 M08`).
+O modo considera a capacidade de todos os dias uteis do mes e desconta horas ja lancadas em
+outras sprints no mesmo periodo.
+
+Na **[3]**, se voce tiver o `claude` CLI instalado da pra escrever *"4h de ontem e move pra
 Active"*; sem ele — ou apertando Enter — o programa pergunta campo a campo. E o mesmo caminho,
 sem escolher "modo". Trocar identidade so aparece no menu quando ha mais de uma cadastrada
 em `config/identities.json`.
@@ -57,7 +66,7 @@ duplicidade. Pre-requisito: ter o **Node 20+** instalado (https://nodejs.org).
 Para repassar a um colega: copie a pasta **sem `.env`, sem `logs/` e sem `config/identities.json`**
 (os tres tem dados pessoais e ja estao no `.gitignore`), peca pra ele instalar o Node, gerar o
 PAT dele e rodar `apontar.cmd`. No primeiro uso ele informa a URL da organizacao, **o projeto**,
-o PAT e o nome/e-mail dele — e so. Para ligar o Time Box, use o menu `[6] -> [1] Colar token`.
+o PAT e o nome/e-mail dele — e so. Para ligar o Time Box, use o menu `[8] -> [1] Colar token`.
 
 Nada no codigo assume uma pessoa, projeto ou area especifica:
 
@@ -85,7 +94,7 @@ Control (a extensao que roda dentro do Azure DevOps). E o unico jeito de ter lan
 dia** de verdade: no TFS o `CompletedWork` e um acumulado do card, no Time Box cada dia e um
 `appointment` proprio (`workedAt` + `workedMinutes`).
 
-**Ligar:** menu `[6] Time Box Control` -> `[1] Colar token`, ou
+**Ligar:** menu `[8] Time Box Control` -> `[1] Colar token`, ou
 `--timebox-token "eyJ..."`. Abra o Time Box no Azure DevOps, use F12 -> Network, selecione uma
 chamada para `amstl.agendaaqui.com.br` e copie o header `Authorization` (`Bearer eyJ...`).
 A identidade contida nesse token e a usada nos apontamentos.
@@ -117,7 +126,7 @@ ja o preenche no payload (`demandNumber`) quando presente.
 
 ## Visao mensal (`--month`)
 
-O menu `[4] Visao mensal` consulta o Time Box e mostra todos os dias uteis do mes, total
+O menu `[5] Visao mensal` consulta o Time Box e mostra todos os dias uteis do mes, total
 apontado, quantidade de lancamentos, quanto falta para 8h e qualquer excesso. Pela linha de
 comando:
 
@@ -200,6 +209,21 @@ Regras aplicadas:
 Como sempre, roda em simulacao por padrao; use `--apply` para gravar. No `--apply` cada dia e
 um PATCH separado no card e uma entrada no audit log; se um dia falhar, os anteriores ja foram
 gravados e o processo para ali.
+
+## Preencher o mes inteiro (`--fill-month`)
+
+Para boards Kanban mensais, use o mes civil em vez de depender da janela de uma sprint de duas
+semanas:
+
+```powershell
+npm start -- --fill-month --month 2026-08 --state Closed
+```
+
+O comando usa todos os dias uteis do mes (segunda a sexta) e o limite de
+`MAX_HOURS_PER_DAY`, portanto agosto de 2026 tem `21 x 8h = 168h` de capacidade. Por padrao,
+seleciona os cards New e Active da iteracao `2026 M08`; use `--sprint` para informar outro nome
+de iteracao mensal. Horas existentes no Time Box, inclusive de outras sprints, reduzem o saldo
+disponivel sem serem contadas em dobro.
 
 Limitacao: no TFS, `CompletedWork` e um acumulado do card, nao um lancamento por dia — a data
 de cada parcela aparece no historico (`System.History`) e no audit log. Lancamento por dia de

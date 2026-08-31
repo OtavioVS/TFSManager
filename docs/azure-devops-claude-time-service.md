@@ -258,6 +258,10 @@ Quando um card nao possui `RemainingWork`, esse saldo livre e dividido pelo tota
 sprint selecionada e usado como estimativa automatica; valores de `RemainingWork` existentes,
 inclusive zero, continuam prevalecendo.
 `--month AAAA-MM` fornece a visao mensal do usuario e destaca dias incompletos ou acima do limite.
+Para um board Kanban mensal, `--fill-month --month AAAA-MM` usa todos os dias uteis do mes e
+seleciona, por padrao, a iteracao mensal `AAAA Mmm` (por exemplo, `2026 M08`). `--sprint`
+sobrescreve o nome da iteracao quando necessario. O saldo diario considera tambem horas do Time
+Box registradas em outras sprints no mesmo periodo.
 
 Payload do apontamento:
 

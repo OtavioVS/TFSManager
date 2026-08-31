@@ -9,6 +9,15 @@ Todas as mudanças relevantes deste projeto serão registradas neste arquivo.
 - Usa o histórico atual do Azure DevOps como fonte da verdade para a validação diária.
 - Usa o audit local somente quando não é possível consultar o Azure DevOps.
 - Evita que horas antigas do audit local bloqueiem ou preencham novamente cards já corrigidos no Azure.
+- Corrige o preenchimento mensal para considerar horas do Time Box lançadas em outras sprints.
+- Evita valores `NaNh` quando o histórico do Azure DevOps é usado no planejamento.
+
+### Adicionado
+
+- Opção `--fill-month` e opção correspondente no menu interativo para boards Kanban mensais.
+- Interface interativa redesenhada: banner com identidade/data/status do Time Box, menu agrupado
+  em seções, validação com re-pergunta, tecla `v` para voltar em qualquer prompt e confirmações
+  padronizadas.
 
 ## [0.2.1] - 2026-08-03
 

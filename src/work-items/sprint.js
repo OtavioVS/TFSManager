@@ -177,7 +177,7 @@ export function resolveSprintCardHours({
 }) {
   const dailyLimit = Math.max(0, Number(maxHoursPerDay) || 0);
   const availableUnits = days.reduce((total, date) => {
-    const alreadyLogged = Math.max(0, Number(hoursByDay[date]) || 0);
+    const alreadyLogged = hoursValue(hoursByDay[date]);
     const free = Math.max(0, dailyLimit - alreadyLogged);
     return total + Math.round(free * 100);
   }, 0);
@@ -226,7 +226,7 @@ export function planSprintAllocation({ days = [], totalHours, maxHoursPerDay, ho
   let remaining = roundHours(totalHours);
 
   for (const date of days) {
-    const alreadyLogged = roundHours(hoursByDay[date] || 0);
+    const alreadyLogged = roundHours(hoursValue(hoursByDay[date]));
     const free = roundHours(maxHoursPerDay - alreadyLogged);
 
     if (free <= 0) {
@@ -276,6 +276,12 @@ function toUtcDate(value) {
 
   const [year, month, day] = iso.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day));
+}
+
+function hoursValue(value) {
+  const raw = typeof value === "object" && value !== null ? value.hours : value;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function isoDay(value) {

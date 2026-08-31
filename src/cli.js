@@ -83,6 +83,33 @@ async function main() {
     return;
   }
 
+  if (args.fillMonth) {
+    const config = buildConfig();
+    if (args.today) {
+      config.policy.today = args.today;
+    }
+    assertRuntimeConfig(config, { needsAzureDevOps: true });
+    const azureDevOpsClient = new AzureDevOpsClient(config.azureDevOps);
+    if (config.timebox.enabled) {
+      await hydrateTimeboxUserConfig(config, azureDevOpsClient);
+      assertRuntimeConfig(config, { needsTimebox: true });
+    }
+
+    const timeboxClient = config.timebox.enabled ? new TimeboxClient(config.timebox) : null;
+    await runFillSprint({
+      args,
+      config,
+      azureDevOpsClient,
+      timeboxClient,
+      service: new WorkItemService({
+        azureDevOpsClient,
+        timeboxClient,
+        config
+      })
+    });
+    return;
+  }
+
   if (args.month !== null) {
     await printMonthlyView({ config: buildConfig(), month: args.month, today: args.today });
     return;
@@ -216,13 +243,23 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
   }
   args.personName = personName;
 
-  const nodes = await azureDevOpsClient.getIterationNodes();
-  let sprintName = isCurrentSprintAlias(args.sprint) ? null : args.sprint;
+  const fillMonth = args.fillMonth === true;
+  const requestedMonth = String(args.month || "").trim().toLowerCase();
+  const selectedMonth = ["atual", "current", "corrente"].includes(requestedMonth)
+    ? (args.today || todayIso()).slice(0, 7)
+    : args.month || (args.today || todayIso()).slice(0, 7);
+  const month = fillMonth
+    ? monthRange(selectedMonth)
+    : null;
+  const nodes = fillMonth ? null : await azureDevOpsClient.getIterationNodes();
+  let sprintName = fillMonth
+    ? args.sprint || monthIterationName(month)
+    : isCurrentSprintAlias(args.sprint) ? null : args.sprint;
   let parentPath = null;
 
   // Sem sprint explicita, descobre a corrente pelos cards do proprio usuario:
   // a area onde ele trabalha define a serie de sprints usada pelo projeto.
-  if (!sprintName && !args.workItemId) {
+  if (!fillMonth && !sprintName && !args.workItemId) {
     const todosOsCards = await listAssignedCards(azureDevOpsClient, config, { person: personName });
     const atual = resolveCurrentSprint({
       rootNode: nodes,
@@ -237,6 +274,10 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
     sprintName = atual.sprint.name;
     parentPath = atual.parentPath;
     console.log(`Sprint corrente detectada: ${sprintName}${parentPath ? ` (area ${parentPath})` : ""}\n`);
+    args.sprint = sprintName;
+  }
+
+  if (fillMonth) {
     args.sprint = sprintName;
   }
 
@@ -257,7 +298,9 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
   }
   parentPath = parentPath || parentOfIterationPath(cards[0].iterationPath);
 
-  const window = findSprintWindow(nodes, sprintName, { parentPath });
+  const window = fillMonth
+    ? { name: sprintName, startDate: month.startDate, finishDate: month.endDate }
+    : findSprintWindow(nodes, sprintName, { parentPath });
   if (!window) {
     throw new Error(`Sprint "${sprintName}" nao encontrada ou sem datas de inicio/fim no TFS.`);
   }
@@ -287,8 +330,10 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
     startDate: window.startDate,
     endDate: window.finishDate
   });
+  // O Time Box inclui horas de outras sprints no mesmo periodo. Mesclar pelo
+  // maior valor evita duplicar os mesmos apontamentos e preserva esse consumo.
   const hoursByDay = tfsHistory.available
-    ? doTfs
+    ? mergeHoursByDay(doTfs, doTimebox)
     : mergeHoursByDay(doAudit, doTimebox);
 
   const estimados = diasEstimados(doTfs).filter((dia) => days.includes(dia));
@@ -338,7 +383,17 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
     plans.push({ card, allocation, hourSource, plannedHours: hours });
   }
 
-  printSprintPlan({ plans, sprintName, window, days, config, args, ignoredByState, cardHours });
+  printSprintPlan({
+    plans,
+    sprintName,
+    window,
+    days,
+    config,
+    args,
+    ignoredByState,
+    cardHours,
+    periodLabel: fillMonth ? `Mes ${month.month}` : null
+  });
 
   const semEspaco = plans.filter((plan) => plan.allocation && plan.allocation.unallocated > 0);
   if (semEspaco.length > 0) {
@@ -394,7 +449,7 @@ async function runFillSprint({ args, config, azureDevOpsClient, timeboxClient, s
     auditLog.append({
       at: new Date().toISOString(),
       mode: "apply",
-      input: { ...auditInput(args), fillSprint: true, sprint: sprintName },
+      input: { ...auditInput(args), fillSprint: !fillMonth, fillMonth, sprint: sprintName },
       command,
       result
     });
@@ -858,6 +913,10 @@ function isCurrentSprintAlias(value) {
   return ["atual", "current", "auto", "corrente"].includes(String(value || "").trim().toLowerCase());
 }
 
+function monthIterationName(month) {
+  return `${month.year} M${String(month.monthNumber).padStart(2, "0")}`;
+}
+
 // Sem --person, usa a unica identidade cadastrada (caso comum de uso pessoal).
 function defaultPersonName(config) {
   const keys = Object.keys(config.policy.identities || {});
@@ -904,7 +963,7 @@ async function printSprintDaySummary({ azureDevOpsClient, timeboxClient, config,
     endDate: window.finishDate
   });
   const porDia = tfsHistory.available
-    ? doTfs
+    ? mergeHoursByDay(doTfs, doTimebox)
     : mergeHoursByDay(doAudit, doTimebox);
 
   const limite = config.policy.maxHoursPerDay;
@@ -1072,9 +1131,10 @@ function printSprintPlan({
   config,
   args,
   ignoredByState = 0,
-  cardHours
+  cardHours,
+  periodLabel = null
 }) {
-  console.log(`Sprint ${sprintName}: ${window.startDate} a ${window.finishDate} (${days.length} dias uteis, limite ${config.policy.maxHoursPerDay}h/dia)`);
+  console.log(`${periodLabel || `Sprint ${sprintName}`}: ${window.startDate} a ${window.finishDate} (${days.length} dias uteis, limite ${config.policy.maxHoursPerDay}h/dia)`);
 
   const filtro = args.states || "New/Active";
   const comHoras = plans.filter((plan) => plan.allocation).length;
@@ -1173,6 +1233,7 @@ function parseArgs(argv) {
     help: false,
     list: false,
     fillSprint: false,
+    fillMonth: false,
     configStatus: false,
     timeboxStatus: false,
     timeboxToken: null,
@@ -1213,6 +1274,8 @@ function parseArgs(argv) {
       args.list = true;
     } else if (value === "--fill-sprint") {
       args.fillSprint = true;
+    } else if (value === "--fill-month" || value === "--fill-monthly") {
+      args.fillMonth = true;
     } else if (value === "--create-tasks") {
       args.createTasks = true;
     } else if (value === "--config-status") {
@@ -1353,6 +1416,7 @@ function printHelp() {
   npm start -- --list --sprint "2026 W24" --status todos
   npm start -- --fill-sprint --state Closed                 (sprint corrente, todos os cards abertos)
   npm start -- --fill-sprint --sprint "2026 W24" --state Closed
+  npm start -- --fill-month --month 2026-08 --state Closed  (board mensal)
   npm start -- --fill-sprint --id 12345,12346 --hours 40 --state Closed
   npm start -- --create-tasks --user-story-id 12345 --phases develop,homologation,deployment
   npm start -- --create-tasks --apply --id 12345 --phases develop,homologation
@@ -1370,6 +1434,10 @@ Opcoes:
                             --hours vira um teto total.
                             Com --state/--column, o ultimo lancamento de cada card
                             muda o estado e zera o trabalho restante.
+  --fill-month              Distribui horas por todos os dias uteis do mes informado
+                            (AAAA-MM), usando a iteracao mensal "AAAA Mmm" para
+                            selecionar os cards. Aceita --month atual e --sprint para
+                            sobrescrever o nome da iteracao.
   --create-tasks            Le uma user story e planeja/cria tarefas filhas por fase.
                             Padrao: develop,homologation,deployment. Simulacao por padrao.
   --user-story-id, --story-id ID da user story que recebera as tarefas. --id tambem funciona.
